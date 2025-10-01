@@ -5,7 +5,7 @@ import altair as alt
 import re
 from io import BytesIO
 from datetime import datetime
-
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import NMF
 
 st.set_page_config(page_title="SAFIC | Webinar Responses Analyzer", page_icon="🌾", layout="wide")
