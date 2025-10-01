@@ -1,4 +1,4 @@
-# --- Import Libraries ---
+# --- Import Libraries --- 
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -224,7 +224,6 @@ class ShapeAdvancedAnalytics:
             
         # Train model
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train, y_train)
         
@@ -317,7 +316,7 @@ class ShapeAdvancedAnalytics:
             'income_per_acre': economic_data['Income_per_Acre'],
             'stats': {
                 'mean': economic_data['Income_per_Acre'].mean(),
-                'median': economic_data['Income_per_Acre'].median(),  # Fixed typo
+                'median': economic_data['Income_per_Acre'].median(),
                 'std': economic_data['Income_per_Acre'].std(),
                 'q1': economic_data['Income_per_Acre'].quantile(0.25),
                 'q3': economic_data['Income_per_Acre'].quantile(0.75)
@@ -540,6 +539,313 @@ def plot_correlation_heatmap(corr_data, title):
                    color_continuous_scale='RdBu_r',
                    aspect="auto")
     return fig
+
+# =========================
+# --- Investor View (NEW) ---
+# =========================
+
+def _safe_num(s):
+    return pd.to_numeric(s, errors='coerce')
+
+def _prep_age_density_fields(df, density_threshold):
+    """Prepare fields needed for investor view & forecasting."""
+    d = df.copy()
+
+    # Area & total trees
+    area_col = 'Total Area under Avocado Cultivation (Acres)'
+    trees_col = '2.3 Number of Avocado Trees Planted'
+    d[area_col] = _safe_num(d.get(area_col))
+    d[trees_col] = _safe_num(d.get(trees_col))
+
+    # Age class tree counts
+    d['trees_0_3'] = _safe_num(d.get('2.41 Number of trees for Age class 0-3 years')).fillna(0)
+    d['trees_4_7'] = _safe_num(d.get('2.42 Number of trees for Age class 4-7 years')).fillna(0)
+    d['trees_8_plus'] = _safe_num(d.get('2.43 Number of trees for Age class 8+ years')).fillna(0)
+
+    # Density (trees per acre) using planted trees / area-under-avocado
+    with np.errstate(divide='ignore', invalid='ignore'):
+        d['trees_per_acre'] = d[trees_col] / d[area_col]
+
+    # Density bin text uses the chosen threshold
+    low_lbl = f"≤{int(density_threshold)}"
+    high_lbl = f">{int(density_threshold)}"
+    d['density_bin'] = np.where(d['trees_per_acre'] > density_threshold, high_lbl, low_lbl)
+
+    # Dominant age group by count
+    age_counts = d[['trees_0_3','trees_4_7','trees_8_plus']]
+    dom = age_counts.idxmax(axis=1).fillna('trees_0_3')
+    d['dominant_age_group'] = dom.map({
+        'trees_0_3':'0-3 years',
+        'trees_4_7':'4-7 years',
+        'trees_8_plus':'8+ years'
+    })
+
+    # Income per acre
+    income_col = '5.3 Total Income from Avocado Sales (KSH last season)'
+    d[income_col] = _safe_num(d.get(income_col))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        d['income_per_acre'] = d[income_col] / d[area_col]
+
+    return d
+
+def show_investor_income_view(df):
+    """Income per acre segmented by dominant age group and density, plus tree age proportions."""
+    st.subheader("💰 Investor View: Income by Tree Age & Density")
+
+    # Choose threshold (default to 90 if available; else median from data)
+    tmp = df.copy()
+    area_col = 'Total Area under Avocado Cultivation (Acres)'
+    trees_col = '2.3 Number of Avocado Trees Planted'
+    tmp[area_col] = _safe_num(tmp.get(area_col))
+    tmp[trees_col] = _safe_num(tmp.get(trees_col))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        tmp['trees_per_acre'] = tmp[trees_col] / tmp[area_col]
+    default_threshold = 90.0 if np.isfinite(tmp['trees_per_acre']).any() else 90.0
+    density_threshold = st.number_input(
+        "Density threshold (trees/acre) for binning",
+        min_value=1.0,
+        value=float(default_threshold),
+        help="Farms at or below this threshold are grouped in the lower density bin; those above in the higher bin."
+    )
+
+    d = _prep_age_density_fields(df, density_threshold)
+    d = d.replace([np.inf, -np.inf], np.nan)
+    d = d.dropna(subset=['income_per_acre', 'dominant_age_group', 'density_bin', 'trees_per_acre'])
+
+    if d.empty:
+        st.info("Not enough data to compute investor view.")
+        return
+
+    col1, col2 = st.columns(2)
+
+    # A) Average income/acre by dominant age group × density
+    grp = (d.groupby(['dominant_age_group','density_bin'])['income_per_acre']
+             .agg(['count','mean','median'])
+             .reset_index()
+             .rename(columns={'mean':'avg_income_per_acre','median':'median_income_per_acre'}))
+
+    with col1:
+        st.markdown("**Income per Acre by Dominant Tree Age & Density**")
+        chart1 = alt.Chart(grp).mark_bar().encode(
+            x=alt.X('dominant_age_group:N', title='Dominant Age Group'),
+            y=alt.Y('avg_income_per_acre:Q', title='Average Income per Acre (KSh)'),
+            color=alt.Color('density_bin:N', title='Density (trees/acre)'),
+            tooltip=['dominant_age_group','density_bin','count',
+                     alt.Tooltip('avg_income_per_acre:Q', format=',.0f', title='Avg Income/acre'),
+                     alt.Tooltip('median_income_per_acre:Q', format=',.0f', title='Median Income/acre')]
+        ).properties(height=380)
+        st.altair_chart(chart1, use_container_width=True)
+
+    # B) Proportion of planted trees by age category (portfolio mix)
+    total_trees = pd.DataFrame({
+        'Age Group':['0-3 years','4-7 years','8+ years'],
+        'Trees':[
+            d['trees_0_3'].sum(),
+            d['trees_4_7'].sum(),
+            d['trees_8_plus'].sum()
+        ]
+    })
+    total_trees = total_trees[total_trees['Trees'] > 0]
+
+    with col2:
+        st.markdown("**Planted Trees by Age Category (Share)**")
+        chart2 = alt.Chart(total_trees).mark_arc().encode(
+            theta=alt.Theta('Trees:Q', stack=True),
+            color=alt.Color('Age Group:N'),
+            tooltip=['Age Group', alt.Tooltip('Trees:Q', format=',')]
+        ).properties(height=380)
+        st.altair_chart(chart2, use_container_width=True)
+
+    # Small table for reference
+    with st.expander("Show summary table"):
+        st.dataframe(grp.sort_values(['dominant_age_group','density_bin']))
+
+def show_income_potential_forecast(df):
+    """Transparent income potential forecast + sensitivity analysis."""
+    st.subheader("📈 Income Potential Forecast (kg/tree × trees/acre × price)")
+
+    # Prices: compute from data; if none, ask user to input.
+    price_col = '5.2 Average Selling Price of (Hass variety) per kg last Season (KSH)'
+    prices = pd.to_numeric(df.get(price_col), errors='coerce') if price_col in df.columns else pd.Series(dtype=float)
+    prices = prices[(~prices.isna()) & (prices > 0) & (prices <= prices.quantile(0.99) if len(prices) else True)]
+    if len(prices):
+        median_price = float(prices.median())
+    else:
+        median_price = st.number_input(
+            "No valid Hass price data found. Enter a reference price (KSh/kg):",
+            min_value=0.0, value=0.0
+        )
+
+    # Density threshold control (align with investor view)
+    area_col = 'Total Area under Avocado Cultivation (Acres)'
+    trees_col = '2.3 Number of Avocado Trees Planted'
+    tmp = df.copy()
+    tmp[area_col] = _safe_num(tmp.get(area_col))
+    tmp[trees_col] = _safe_num(tmp.get(trees_col))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        tmp['trees_per_acre'] = tmp[trees_col] / tmp[area_col]
+    default_threshold = 90.0 if np.isfinite(tmp['trees_per_acre']).any() else 90.0
+    density_threshold = st.number_input(
+        "Forecast density threshold (trees/acre)",
+        min_value=1.0,
+        value=float(default_threshold),
+        help="Used to label farms into low/high density buckets in the forecast charts."
+    )
+
+    d = _prep_age_density_fields(df, density_threshold).copy()
+    d = d.dropna(subset=[area_col])
+    d = d[d[area_col] > 0].replace([np.inf, -np.inf], np.nan)
+
+    # Trees per acre by age class
+    for col_src, col_out in [
+        ('trees_0_3','tpa_0_3'),
+        ('trees_4_7','tpa_4_7'),
+        ('trees_8_plus','tpa_8_plus'),
+    ]:
+        d[col_out] = d[col_src] / d[area_col]
+
+    # Reference kg per tree from YIELD_REFERENCE
+    kg03 = YIELD_REFERENCE['0-3']['kg']
+    kg47 = YIELD_REFERENCE['4-7']['kg']
+    kg8p = YIELD_REFERENCE['8+']['kg']
+
+    # Baseline forecast income per acre
+    d['forecast_income_per_acre'] = (
+        d['tpa_0_3'] * kg03 +
+        d['tpa_4_7'] * kg47 +
+        d['tpa_8_plus'] * kg8p
+    ) * median_price
+
+    d = d.dropna(subset=['forecast_income_per_acre', 'density_bin', 'dominant_age_group'])
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(f"**Forecast income per acre** (reference price ≈ KSh {median_price:,.0f})")
+        st.plotly_chart(
+            px.histogram(d, x='forecast_income_per_acre', nbins=30,
+                         labels={'forecast_income_per_acre':'Forecast Income per Acre (KSh)'},
+                         title="Baseline Forecast Distribution"),
+            use_container_width=True
+        )
+
+    # By density & dominant age group
+    by_cut = (d.groupby(['dominant_age_group','density_bin'])['forecast_income_per_acre']
+                .agg(['count','mean','median'])
+                .reset_index()
+                .rename(columns={'mean':'avg_forecast_income_per_acre',
+                                 'median':'median_forecast_income_per_acre'}))
+
+    with col2:
+        st.markdown("**Baseline Forecast by Dominant Age × Density**")
+        st.altair_chart(
+            alt.Chart(by_cut).mark_bar().encode(
+                x=alt.X('dominant_age_group:N', title='Dominant Age Group'),
+                y=alt.Y('avg_forecast_income_per_acre:Q', title='Avg Forecast Income per Acre (KSh)'),
+                color=alt.Color('density_bin:N', title='Density (trees/acre)'),
+                tooltip=['dominant_age_group','density_bin','count',
+                         alt.Tooltip('avg_forecast_income_per_acre:Q', format=',.0f'),
+                         alt.Tooltip('median_forecast_income_per_acre:Q', format=',.0f')]
+            ).properties(height=380),
+            use_container_width=True
+        )
+
+    # Headline KPIs (baseline)
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Median Forecast (KSh/acre)", f"{d['forecast_income_per_acre'].median():,.0f}")
+    k2.metric("P75 Forecast (KSh/acre)", f"{d['forecast_income_per_acre'].quantile(0.75):,.0f}")
+    k3.metric("Top Decile (KSh/acre)", f"{d['forecast_income_per_acre'].quantile(0.90):,.0f}")
+
+    # --- Sensitivity widget (price ±%, density scenarios) ---
+    st.markdown("### 🎛️ Sensitivity Analysis")
+    sens_col1, sens_col2, sens_col3 = st.columns(3)
+
+    with sens_col1:
+        price_delta_pct = st.slider(
+            "Price change (%)",
+            min_value=-50, max_value=50, value=0, step=1,
+            help="Apply a percentage change to the reference price to see upside/downside."
+        )
+
+    # default target density set from the data distribution (75th percentile of trees_per_acre)
+    observed_tpa = d['trees_per_acre'].dropna()
+    default_target_density = float(np.nanpercentile(observed_tpa, 75)) if len(observed_tpa) else 0.0
+    with sens_col2:
+        target_density = st.number_input(
+            "Target density (trees/acre)",
+            min_value=0.0, value=default_target_density,
+            help="Scenario density used to simulate what happens if farms reach this trees/acre level."
+        )
+
+    with sens_col3:
+        apply_scope = st.selectbox(
+            "Apply density scenario to:",
+            options=["All farms", f"Only {d['density_bin'].unique()[0]} bin", f"Only {d['density_bin'].unique()[-1]} bin"],
+            help="Choose where to apply the target density."
+        )
+
+    # Apply sensitivity: price change and density scenario
+    price_factor = 1.0 + (price_delta_pct / 100.0)
+    scenario_price = median_price * price_factor
+
+    scen = d.copy()
+
+    # Determine which rows to update for density scenario
+    if apply_scope == "All farms":
+        mask = pd.Series(True, index=scen.index)
+    else:
+        # extract the label inside the option text after "Only "
+        wanted_bin = apply_scope.replace("Only ", "")
+        mask = scen['density_bin'].astype(str).eq(wanted_bin)
+
+    # Recalculate trees-per-acre by age so that total trees_per_acre equals target_density (keep within-farm age mix)
+    total_tpa = scen[['tpa_0_3','tpa_4_7','tpa_8_plus']].sum(axis=1)
+    share_03 = np.divide(scen['tpa_0_3'], total_tpa, out=np.zeros_like(scen['tpa_0_3']), where=total_tpa>0)
+    share_47 = np.divide(scen['tpa_4_7'], total_tpa, out=np.zeros_like(scen['tpa_4_7']), where=total_tpa>0)
+    share_8p = np.divide(scen['tpa_8_plus'], total_tpa, out=np.zeros_like(scen['tpa_8_plus']), where=total_tpa>0)
+
+    scen.loc[mask, 'tpa_0_3_scen'] = share_03[mask] * target_density
+    scen.loc[mask, 'tpa_4_7_scen'] = share_47[mask] * target_density
+    scen.loc[mask, 'tpa_8_plus_scen'] = share_8p[mask] * target_density
+
+    # For rows not in mask, keep baseline
+    scen.loc[~mask, 'tpa_0_3_scen'] = scen.loc[~mask, 'tpa_0_3']
+    scen.loc[~mask, 'tpa_4_7_scen'] = scen.loc[~mask, 'tpa_4_7']
+    scen.loc[~mask, 'tpa_8_plus_scen'] = scen.loc[~mask, 'tpa_8_plus']
+
+    # Scenario income/acre
+    scen['forecast_income_per_acre_scen'] = (
+        scen['tpa_0_3_scen'] * kg03 +
+        scen['tpa_4_7_scen'] * kg47 +
+        scen['tpa_8_plus_scen'] * kg8p
+    ) * scenario_price
+
+    # KPI deltas
+    base_med = d['forecast_income_per_acre'].median()
+    scen_med = scen['forecast_income_per_acre_scen'].median()
+    base_p75 = d['forecast_income_per_acre'].quantile(0.75)
+    scen_p75 = scen['forecast_income_per_acre_scen'].quantile(0.75)
+
+    dk1, dk2 = st.columns(2)
+    dk1.metric("Median Forecast (Scenario)", f"{scen_med:,.0f}", f"{(scen_med-base_med):+.0f}")
+    dk2.metric("P75 Forecast (Scenario)", f"{scen_p75:,.0f}", f"{(scen_p75-base_p75):+.0f}")
+
+    # ---- FIXED: reshape DataFrame BEFORE plotting (no .melt() on a figure) ----
+    compare_df = pd.DataFrame({
+        'Baseline': d['forecast_income_per_acre'].values,
+        'Scenario': scen['forecast_income_per_acre_scen'].values
+    })
+    compare_long = compare_df.melt(var_name='Case', value_name='KSh_per_acre')
+    fig_compare = px.histogram(
+        compare_long,
+        x='KSh_per_acre',
+        color='Case',
+        barmode='overlay',
+        nbins=30,
+        labels={'KSh_per_acre':'KSh/acre'},
+        title='Baseline vs Scenario: Income per Acre'
+    )
+    st.plotly_chart(fig_compare, use_container_width=True)
 
 # --- Dashboard Sections ---
 def show_overview(df, metrics_df):
@@ -1128,6 +1434,11 @@ def main():
             show_geospatial(filtered_df)
             show_certification(filtered_df)
             show_production_metrics(filtered_df)
+
+            # --- Investor-oriented sections ---
+            show_investor_income_view(filtered_df)
+            show_income_potential_forecast(filtered_df)
+
             show_market_analysis(filtered_df)
             show_training_needs(filtered_df)
             
@@ -1154,7 +1465,6 @@ def main():
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
-        st.info("Please ensure: \n1. Your data file is named 'shape_data.xlsx' \n2. It contains 'Baseline' and 'Metrics' sheets \n3. The columns match the expected format")
 
 if __name__ == "__main__":
     main()
