@@ -358,18 +358,23 @@ def create_farm_map(df):
     
     # Add markers for each farm
     for idx, row in map_df.iterrows():
+        farm_name = row.get("1.22 Orchard Name/ Name of farm", "N/A")
+        farmer_name = row.get("1.10 Farmer's Name (Three Names)", "N/A")
+        trees = row.get("2.3 Number of Avocado Trees Planted", "N/A")
+        variety = "Hass" if row.get("3.1 Variety Grown/Hass", 0) == 1 else "Other"
+
         popup_text = f"""
-        <b>Farm:</b> {row.get('1.22 Orchard Name/ Name of farm', 'N/A')}<br>
-        <b>Farmer:</b> {row.get('1.10 Farmer\'s Name (Three Names)', 'N/A')}<br>
-        <b>Trees:</b> {row.get('2.3 Number of Avocado Trees Planted', 'N/A')}<br>
-        <b>Variety:</b> {'Hass' if row.get('3.1 Variety Grown/Hass', 0) == 1 else 'Other'}
+        <b>Farm:</b> {farm_name}<br>
+        <b>Farmer:</b> {farmer_name}<br>
+        <b>Trees:</b> {trees}<br>
+        <b>Variety:</b> {variety}
         """
-        
+
         folium.Marker(
-            location=[row['_1.21 GPS Coordinates of Orchard_latitude'], 
-                     row['_1.21 GPS Coordinates of Orchard_longitude']],
+            location=[row["_1.21 GPS Coordinates of Orchard_latitude"],
+                    row["_1.21 GPS Coordinates of Orchard_longitude"]],
             popup=folium.Popup(popup_text, max_width=250),
-            icon=folium.Icon(color='green', icon='leaf')
+            icon=folium.Icon(color="green", icon="leaf")
         ).add_to(m)
     
     return m
