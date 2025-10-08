@@ -415,62 +415,84 @@ def create_certification_chart(df):
     return chart
 
 def create_yield_comparison_chart(df):
-    """Create yield comparison by tree age with true side-by-side bars"""
+    """Create yield comparison by tree age with grouped bars + value & % labels."""
     if df.empty:
         return None
-    
-    yield_data = []
-    age_groups = ['0-3', '4-7', '8+']
-    
-    for age in age_groups:
-        fruits_col = f'Fruits per tree {age} years'
-        if fruits_col in df.columns:
-            avg_fruits = df[fruits_col].mean()
-            expected_fruits = YIELD_REFERENCE[age]['fruits']
-            yield_data.append({
-                'Age Group': f'{age} years',
-                'Value': avg_fruits,
-                'Category': 'Actual'
-            })
-            yield_data.append({
-                'Age Group': f'{age} years',
-                'Value': expected_fruits,
-                'Category': 'Expected'
-            })
-    
-    if not yield_data:
+
+    dark_blue  = '#0057D9'  # Actual
+    light_blue = '#8EC4FF'  # Expected
+
+    # Build tidy data + keep age order
+    age_order = ['0-3 years', '4-7 years', '8+ years']
+    rows = []
+    for age in ['0-3', '4-7', '8+']:
+        col = f'Fruits per tree {age} years'
+        if col in df.columns:
+            actual = float(pd.to_numeric(df[col], errors='coerce').mean())
+            expected = float(YIELD_REFERENCE[age]['fruits'])
+            label = f'{age} years'
+            rows += [
+                {'Age Group': label, 'Category': 'Actual',   'Value': actual,   'Expected': expected},
+                {'Age Group': label, 'Category': 'Expected', 'Value': expected, 'Expected': expected},
+            ]
+    if not rows:
         return None
-    
-    yield_df = pd.DataFrame(yield_data)
-    
-    # Create the chart with true side-by-side bars using position dodging
-    chart = alt.Chart(yield_df).mark_bar(
-        opacity=0.8,
-        stroke='black',
-        strokeWidth=0.5
-    ).encode(
-        x=alt.X('Category:N', title=None, 
-               axis=alt.Axis(labels=False, ticks=False),
-               scale=alt.Scale(paddingInner=0.2)),
-        y=alt.Y('Value:Q', title='Average Fruits per Tree'),
-        color=alt.Color('Category:N', 
-                      scale=alt.Scale(domain=['Actual', 'Expected'],
-                                    range=['#1f77b4', '#ff7f0e']),
-                      legend=alt.Legend(title="Measurement Type")),
-        column=alt.Column('Age Group:N', title='Tree Age Group',
-                        spacing=10),
-        tooltip=['Age Group', 'Category', 'Value']
-    ).properties(
-        title='Average Fruits per Tree (Actual vs Expected)',
-        width=80,  # Width of each individual bar group
-        height=400
+
+    data = pd.DataFrame(rows)
+    # Compute "% of expected" only for Actual bars
+    data['PctOfExpected'] = np.where(
+        data['Category'].eq('Actual') & (data['Expected'] > 0),
+        (data['Value'] / data['Expected']) * 100.0,
+        np.nan
+    )
+    data['PctLabel'] = data['PctOfExpected'].apply(lambda x: f"{x:.0f}%" if pd.notna(x) else "")
+
+    base = alt.Chart(data)
+
+    bar = base.mark_bar(opacity=0.85, stroke='black', strokeWidth=0.5).encode(
+        x=alt.X('Age Group:N', title='Age Group', sort=age_order, axis=alt.Axis(labelAngle=0)),
+        xOffset=alt.XOffset('Category:N'),
+        y=alt.Y('Value:Q',
+                title='Average Fruits per Tree',
+                axis=alt.Axis(format=',')  # thousands separators
+               ),
+        color=alt.Color(
+            'Category:N',
+            title='Measurement Type',
+            scale=alt.Scale(domain=['Actual', 'Expected'], range=[dark_blue, light_blue])
+        ),
+        tooltip=['Age Group', 'Category', alt.Tooltip('Value:Q', format=',.0f')]
+    ).properties(width=380, height=380)
+
+    # Value label on every bar
+    value_labels = base.mark_text(dy=-6, fontWeight='bold').encode(
+        x='Age Group:N',
+        xOffset='Category:N',
+        y='Value:Q',
+        text=alt.Text('Value:Q', format=',.0f'),
+        color=alt.value('black')
+    )
+
+    # % of expected shown only on Actual bars (slightly above the value label)
+    pct_labels = base.transform_filter(
+        alt.datum.Category == 'Actual'
+    ).mark_text(dy=-22).encode(
+        x='Age Group:N',
+        xOffset='Category:N',
+        y='Value:Q',
+        text='PctLabel:N',
+        color=alt.value('#555')
+    )
+
+    chart = (bar + value_labels + pct_labels).properties(
+        title='Average Fruits per Tree (Actual vs Expected)'
     ).configure_view(
         stroke='transparent'
     ).configure_axis(
         labelFontSize=12,
         titleFontSize=14
     )
-    
+
     return chart
 
 def create_wordcloud(text, title):
@@ -590,7 +612,7 @@ def _prep_age_density_fields(df, density_threshold):
 
 def show_investor_income_view(df):
     """Income per acre segmented by dominant age group and density, plus tree age proportions."""
-    st.subheader("💰 Investor View: Income by Tree Age & Density")
+    st.subheader("💰 Income by Tree Age & Density")
 
     # Choose threshold (default to 90 if available; else median from data)
     tmp = df.copy()
@@ -672,7 +694,7 @@ def show_income_potential_forecast(df):
         median_price = float(prices.median())
     else:
         median_price = st.number_input(
-            "No valid Hass price data found. Enter a reference price (KSh/kg):",
+            "Enter a reference price (KSh/kg):",
             min_value=0.0, value=0.0
         )
 
