@@ -1,0 +1,41 @@
+[33mcommit 5a0f07eafcefd63d78e87cb875fb6d186ed3823b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: dkeya <keyahdavid@gmail.com>
+Date:   Fri Oct 31 16:59:53 2025 +0300
+
+    Fix: pin numpy and pandas to support Python 3.13
+
+[33mcommit 3590d5f1c9337b3626e2b11717dec8500f67e0cd[m
+Author: dkeya <keyahdavid@gmail.com>
+Date:   Fri Oct 31 16:41:58 2025 +0300
+
+    fix: Use minimal compatible package versions
+
+[33mcommit 3cd54a1a444a748c748c3e6d9f8b2189dd212f81[m
+Author: dkeya <keyahdavid@gmail.com>
+Date:   Fri Oct 31 16:34:22 2025 +0300
+
+    fix: Use compatible numpy version 1.26.4
+
+[33mcommit f80e948ee1ca547895e91b9ea9de2211b63b9ba8[m
+Author: dkeya <keyahdavid@gmail.com>
+Date:   Fri Oct 31 16:27:48 2025 +0300
+
+    fix: Update requirements.txt with all dependencies
+
+[33mcommit 36402e773114851d5d172e67b03114db216f5b67[m
+Author: dkeya <keyahdavid@gmail.com>
+Date:   Fri Oct 31 16:08:28 2025 +0300
+
+    fix: Complete farmer_sampling.py for deployment
+
+[33mcommit af3b12283b3f795134715e3b59dc4a3a250ea468[m
+Author: dkeya <keyahdavid@gmail.com>
+Date:   Fri Oct 31 16:04:14 2025 +0300
+
+    feat: Add dry matter sampling planner to SHAPe dashboard
+
+[33mcommit e966a65cdfa3802c591f9da02215d78a30b54447[m
+Author: dkeya <keyahdavid@gmail.com>
+Date:   Fri Oct 31 15:55:51 2025 +0300
+
+    feat: Add avocado dry matter sampling app
