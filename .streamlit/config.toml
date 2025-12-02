@@ -1,8 +1,0 @@
-@"
-[server]
-headless = true
-enableCORS = false
-
-[client]
-showErrorDetails = true
-"@ | Set-Content .streamlit\config.toml -Encoding UTF8
